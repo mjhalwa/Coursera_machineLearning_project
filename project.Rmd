@@ -1,0 +1,106 @@
+---
+title: "Machine Learning Project"
+author: "Martin Halwachs"
+date: "25 Mai 2017"
+output:
+  html_document:
+    toc: TRUE
+---
+
+# requirements
+
+- predict the `classe` variable  
+- create report  
+- describe how you **build the model**  
+- describe how you use **cross validation**  
+- estimate the **out of sample error**  
+- explain why you made your choices  
+- github repository  
+    - R markdown file  
+    - compiled HTM file  
+    - less than 2000 words  
+    - less than 5 figures  
+    - submit with a gh-pages branch = allow online view of HTML  
+    
+for the quiz you will need to:
+
+- predict 20 different test cases with your model  
+
+
+# introduction
+For this course project data will be used from http://groupware.les.inf.puc-rio.br/har. 6 participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. There activity was tracked by accelerometers on the belt, forearm, arm and dumbell. We will try to find a model, allowing to qualify a participant's quality of activity in terms of correctness.
+
+# libraries
+This project needs the following libraries. In case you don't have them installed, you may use `install.packages()` function
+```{r libraries, message=FALSE, warning=FALSE}
+library(dplyr)
+```
+
+# Preparing the data set
+First training and test data is loaded from the web and into `trainData` and `testData`
+```{r load data, message=FALSE, cache=TRUE}
+trainURL <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testURL <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+download.file(trainURL, destfile="training.csv", method="curl")
+download.file(testURL, destfile="testing.csv", method="curl")
+
+trainData <- read.table("training.csv", header=TRUE, sep=",", na.strings = "NA",
+                        stringsAsFactors=FALSE)
+testData <- read.table("testing.csv", header=TRUE, sep=",", na.strings = "NA",
+                        stringsAsFactors=FALSE)
+```
+
+These data sets contain the following amount of data
+```{r}
+dim(trainData)
+dim(testData)
+```
+
+For this project we only need the accelerometer data, the user names, and the output `classe`. Therefore data will be extracted
+```{r reduce data set, dependson="load data", cache=TRUE}
+accelerometer.cols <- grep("accel",names(trainData))
+other.cols <- grep("classe|user_name",names(trainData))
+trainData <- select(trainData, c(other.cols,accelerometer.cols))
+
+accelerometer.cols <- grep("accel",names(testData))
+other.cols <- grep("user_name",names(testData))
+testData <- select(testData, c(other.cols,accelerometer.cols))
+```
+
+As variance data contains a lot of NAs (out of `r dim(trainData)[[1]]` rows), where first line shows the total rows and the second line shows the percentage of rows being `NA`
+```{r}
+train.var.cols <- grep("^var_", names(trainData))
+rbind(apply(is.na(trainData[,train.var.cols]), 2, sum),
+      round(apply(is.na(trainData[,train.var.cols]), 2, sum)/dim(trainData)[[1]]*100,2))
+
+test.var.cols <- grep("^var_", names(testData))
+rbind(apply(is.na(testData[,test.var.cols]), 2, sum),
+      round(apply(is.na(testData[,test.var.cols]), 2, sum)/dim(testData)[[1]]*100,2))
+```
+
+, these will be removed as well
+```{r}
+trainData <- select(trainData, -c(train.var.cols))
+testData <- select(testData, -c(test.var.cols))
+```
+
+`classe` and `user_name` are then formatted to factors
+```{r}
+trainData$classe <- as.factor(trainData$classe)
+trainData$user_name <- as.factor(trainData$user_name)
+testData$user_name <- as.factor(testData$user_name)
+```
+
+Now the training data set looks like this
+```{r}
+str(trainData)
+```
+
+
+
+
+
+
+
+
