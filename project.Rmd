@@ -57,35 +57,28 @@ dim(trainData)
 dim(testData)
 ```
 
-For this project we only need the accelerometer data, the user names, and the output `classe`. Therefore data will be extracted
-```{r reduce data set, dependson="load data", cache=TRUE}
-accelerometer.cols <- grep("accel",names(trainData))
-other.cols <- grep("classe|user_name",names(trainData))
-trainData <- select(trainData, c(other.cols,accelerometer.cols))
-
-accelerometer.cols <- grep("accel",names(testData))
-other.cols <- grep("user_name",names(testData))
-testData <- select(testData, c(other.cols,accelerometer.cols))
-```
-
-As variance data contains a lot of NAs (out of `r dim(trainData)[[1]]` rows), where first line shows the total rows and the second line shows the percentage of rows being `NA`
+# filtering variables
+These columns are in the training, but not in the testing set
 ```{r}
-train.var.cols <- grep("^var_", names(trainData))
-rbind(apply(is.na(trainData[,train.var.cols]), 2, sum),
-      round(apply(is.na(trainData[,train.var.cols]), 2, sum)/dim(trainData)[[1]]*100,2))
-
-test.var.cols <- grep("^var_", names(testData))
-rbind(apply(is.na(testData[,test.var.cols]), 2, sum),
-      round(apply(is.na(testData[,test.var.cols]), 2, sum)/dim(testData)[[1]]*100,2))
+train.but.not.in.test <- names(trainData)[!names(trainData) %in% names(testData)]
+train.but.not.in.test
 ```
 
-, these will be removed as well
+Therefore all data, but 'classe' are contained in the testing set, while testing contains the column `problem_id` (as column number of the data sets is equal). From all columns the ones with NAs in testing can be excluded from model building, as they allow no prediction:
 ```{r}
-trainData <- select(trainData, -c(train.var.cols))
-testData <- select(testData, -c(test.var.cols))
+nas.in.testData <- apply(is.na(testData), 2, sum)
+nas.in.testData <- nas.in.testData[nas.in.testData>0]
 ```
 
-`classe` and `user_name` are then formatted to factors
+As the minimum number of NAs per variable is `r min(nas.in.testData)` and the testing set only contains 20 rows, these can all be excluded from training and testing data set.
+```{r}
+trainData <- trainData[,! names(trainData) %in% names(nas.in.testData)]
+testData <- testData[,! names(testData) %in% names(nas.in.testData)]
+```
+
+This leaves `r dim(trainData)` variables in `trainData` and `testData` (including the predict)
+
+Next `classe` and `user_name` are formatted to factors
 ```{r}
 trainData$classe <- as.factor(trainData$classe)
 trainData$user_name <- as.factor(trainData$user_name)
