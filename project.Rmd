@@ -196,8 +196,8 @@ training.sub <- select(training, c(gyros_arm_y, gyros_belt_x, gyros_belt_y, gyro
 
 The last chapters resulted in 2 sets of variables for training:  
 
-* `training` which contains `r length(names(training)-1)` regressors  
-* `training.sub` which has a reduced set of `r length(names(training.sub)-1)` regressors, compared to `training`  
+* `training` which contains `r length(names(training))-1` regressors  
+* `training.sub` which has a reduced set of `r length(names(training.sub))-1` regressors, compared to `training`  
 
 To predict on `classe` the following methods will be compared:
 
