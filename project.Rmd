@@ -37,63 +37,263 @@ library(dplyr)
 ```
 
 # Preparing the data set
-First training and test data is loaded from the web and into `trainData` and `testData`
+First training and test data is loaded from the web and into `trainData` and `quizData`
 ```{r load data, message=FALSE, cache=TRUE}
-trainURL <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
-testURL <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
-
-download.file(trainURL, destfile="training.csv", method="curl")
-download.file(testURL, destfile="testing.csv", method="curl")
-
+if(!file.exists("training.csv"))
+{
+  trainURL <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+  download.file(trainURL, destfile="training.csv", method="curl")
+}
+if(!file.exists("quiz.csv"))
+{
+  quizURL <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+  download.file(quizURL, destfile="quiz.csv", method="curl")
+}
+  
 trainData <- read.table("training.csv", header=TRUE, sep=",", na.strings = "NA",
                         stringsAsFactors=FALSE)
-testData <- read.table("testing.csv", header=TRUE, sep=",", na.strings = "NA",
+quizData <- read.table("quiz.csv", header=TRUE, sep=",", na.strings = "NA",
                         stringsAsFactors=FALSE)
 ```
 
 These data sets contain the following amount of data
 ```{r}
 dim(trainData)
-dim(testData)
+dim(quizData)
 ```
 
-# filtering variables
+## filtering variables
 These columns are in the training, but not in the testing set
 ```{r}
-train.but.not.in.test <- names(trainData)[!names(trainData) %in% names(testData)]
-train.but.not.in.test
+train.but.not.in.quiz <- names(trainData)[!names(trainData) %in% names(quizData)]
+train.but.not.in.quiz
 ```
 
-Therefore all data, but 'classe' are contained in the testing set, while testing contains the column `problem_id` (as column number of the data sets is equal). From all columns the ones with NAs in testing can be excluded from model building, as they allow no prediction:
+Therefore all data, but 'classe' are contained in the quiz set, while quiz contains the column `problem_id` (as column number of the data sets is equal). From all columns the ones with NAs in `quizData` can be excluded from model building, as they allow no prediction:
 ```{r}
-nas.in.testData <- apply(is.na(testData), 2, sum)
-nas.in.testData <- nas.in.testData[nas.in.testData>0]
+nas.in.quizData <- apply(is.na(quizData), 2, sum)
+nas.in.quizData <- nas.in.quizData[nas.in.quizData>0]
 ```
 
-As the minimum number of NAs per variable is `r min(nas.in.testData)` and the testing set only contains 20 rows, these can all be excluded from training and testing data set.
+As the minimum number of NAs per variable is `r min(nas.in.quizData)` and the testing set only contains 20 rows, these can all be excluded from training and quiz data set.
 ```{r}
-trainData <- trainData[,! names(trainData) %in% names(nas.in.testData)]
-testData <- testData[,! names(testData) %in% names(nas.in.testData)]
+trainData <- trainData[,! names(trainData) %in% names(nas.in.quizData)]
+quizData <- quizData[,! names(quizData) %in% names(nas.in.quizData)]
 ```
 
-This leaves `r dim(trainData)` variables in `trainData` and `testData` (including the predict)
+This leaves `r dim(trainData)` variables in `trainData` and `quizData` (including the predict)
 
 Next `classe` and `user_name` are formatted to factors
 ```{r}
 trainData$classe <- as.factor(trainData$classe)
 trainData$user_name <- as.factor(trainData$user_name)
-testData$user_name <- as.factor(testData$user_name)
+quizData$user_name <- as.factor(quizData$user_name)
 ```
 
-Now the training data set looks like this
+## correcting the timestamp
+the data contains two timestamps: `raw_timestamp_part_1` and `raw_timestamp_part_2`, besides the human readable `cvtd_timestamp`. Comparing `part_1` with the `cvtd`, we find, that it contains the main time
 ```{r}
-str(trainData)
+as.POSIXct(head(trainData$raw_timestamp_part_1),origin="1970-01-01",tz="GMT")
+head(trainData$cvtd_timestamp)
+```
+
+So what about `part_2`? This seems to be the milliseconds. Because, if we look at the first 44 elements, or at a plot versus data line number, we find a periodicity in a growth from 0 to 1,000,000 with following step to 0 again.
+```{r, fig.width=12, figh.height=4}
+head(trainData$raw_timestamp_part_2,n=44)
+with(head(trainData,n=1000), plot(x=X, y=raw_timestamp_part_2,type="l"))
+```
+
+Therefore these 3 variables may be put into 1 timestamp column, this is demonstrated with `temp1` and `temp2` first.
+```{r}
+total.time <- function(part1, part2)
+{
+  as.POSIXct(part1,origin="1970-01-01",tz="GMT")+part2/1E6
+}
+temp1 <- as.POSIXct(head(trainData$raw_timestamp_part_1),origin="1970-01-01",tz="GMT")
+temp2 <- total.time(head(trainData$raw_timestamp_part_1),head(trainData$raw_timestamp_part_2))
+data.frame(just.part1=format(temp1, "%Y-%m-%d %H:%M:%OS6"),
+           millis=head(trainData$raw_timestamp_part_2),
+           total.time=format(temp2, "%Y-%m-%d %H:%M:%OS6"))
+```
+
+Neglecting minor rounding errors on the last digits, this is applied to training and quiz data set, deleting the other time columns. Further we dismiss the line number `X`
+```{r}
+trainData$timestamp <- total.time(trainData$raw_timestamp_part_1, trainData$raw_timestamp_part_2)
+quizData$timestamp <- total.time(quizData$raw_timestamp_part_1, quizData$raw_timestamp_part_2)
+trainData <- select(trainData, -c(raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, X))
+quizData <- select(quizData, -c(raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, X))
 ```
 
 
+## the tidy data set
+Now the training data set has the following variables
+```{r}
+names(trainData)
+```
+
+# model building
+For model building we split `trainData` in a set for `training` and a set for `testing`
+```{r}
+library(caret)
+set.seed(1)
+inTrain <- createDataPartition(y=trainData$classe, p=0.75, list=FALSE)
+training <- trainData[inTrain,]
+testing <- trainData[-inTrain,]
+```
+
+Now a model will be developed on the the training set
+```{r}
+dim(training)
+```
+
+## find important variables
+First we try to find out about the importance of the time stamp for prediction:
+```{r, fig.width=12, fig.height=5}
+library(ggplot2)
+p <- ggplot(filter(training, timestamp < "2011-11-30"), aes(x=timestamp, y=roll_belt, colour=classe))
+p + geom_point()
+```
+
+From this plot, it is clear, the the instructions were confusing, and we don't need to predict whether a certaing activity was performed wrong or right. We need to predict, the activity performed. Therefore we can neglect the variables `timestamp`, `new_window` and `num_window` as they have a predefined correlation with `classe`, not allowing general prediction. Same goes for `user_name`
+```{r}
+training <- select(training, -c(timestamp, new_window, num_window, user_name))
+```
+
+Let's try to find highly correlated data with a simple method. A correlation matrix is calculated from all remaining columns, but `classe` and `user_name`. this can further be analyzed with the `findCorrelation` function
+```{r}
+corrMatrix <- cor(select(training,-c(classe)))
+corrCols.names <- findCorrelation(corrMatrix, names=TRUE, cutoff=0.90)
+corrCols <- as.numeric(lapply(corrCols.names, FUN=grep, x=names(training)))
+corrCols.names
+corrCols
+```
+
+These columns show a high correlation with some other column and are therefore removed
+```{r}
+dim(training)
+training <- training[,-corrCols]
+dim(training)
+```
 
 
+All remaining variables are then plotted against `classe` to reveal if logarithm of any variable is needed. Further this plot allows to compare all variables for their correlation with the desired predictor.
+```{r, fig.width=12, figh.height=12, cache=TRUE}
+library(tidyr)
+plotData <- gather(training, variable, value, -classe)
+p <- ggplot(plotData, aes(x=value, y=classe, colour=classe))
+p + geom_point(alpha=0.5) + facet_wrap(~variable, scale="free_x")
+```
 
+This contains several plots, where outliers do not reveal the variability of each variable. In the replot, the outliers are omitted.
+```{r, fig.width=12, figh.height=12, cache=TRUE}
+plotData <- filter(training, gyros_dumbbell_y<20 &
+                             gyros_forearm_x>-15 &
+                             gyros_forearm_y<100 &
+                             gyros_forearm_z<100 &
+                             magnet_dumbbell_y>-2000)
+plotData <- gather(plotData, variable, value, -classe)
+p <- ggplot(plotData, aes(x=value, y=classe, colour=classe))
+p + geom_point(alpha=0.5) + facet_wrap(~variable, scale="free_x")
+```
+
+All data show good variability. An additional logarithm is not needed.
+
+## the model
+First we try a simple model with all remaining variables using **regression trees**
+```{r simple model, cache=TRUE}
+modFit.simple <- train(classe ~ ., data=training, method="rpart")
+```
+
+The validation on the training set looks like this, with the according accuracy
+```{r}
+predClasse <- predict(modFit.simple,training[,-grep("classe",names(training))])
+table(predClasse, training$classe)
+accuracy <- sum(predClasse == training$classe)/length(predClasse)
+accuracy
+```
+
+This is too inaccurate. Therefore we try to reduce the variables to the ones above showing in-equal distributions
+```{r}
+training.sub <- select(training, c(gyros_arm_y, gyros_belt_x, gyros_belt_y, gyros_belt_z,
+                               gyros_dumbbell_y, gyros_forearm_x, gyros_forearm_z,
+                               magnet_belt_x, magnet_belt_y, magnet_belt_z,
+                               magnet_dumbbell_x, magnet_dumbbell_y, pitch_belt,
+                               pitch_forearm, roll_arm, roll_forearm, total_accel_belt,
+                               yaw_arm, yaw_belt, classe))
+```
+
+Then we train a model with these
+```{r reduced model, cache=TRUE}
+modFit.reduced <- train(classe ~ ., data=training.sub, method="rpart")
+```
+
+This results in the following accuracy
+```{r}
+predClasse <- predict(modFit.reduced,training.sub[,-grep("classe",names(training.sub))])
+table(predClasse, training.sub$classe)
+accuracy <- sum(predClasse == training$classe)/length(predClasse)
+accuracy
+```
+
+But this is still too inaccurate and even worse than above. In this case of various varibles, which seem to have different correlation to the predictor, **adaboost** may be helpful, which is implemented in the `gbm` method. Let's try it on both the training data set and the reduced data set.
+```{r adaboost model, cache=TRUE}
+modFit.ada <- train(classe ~ ., data=training, method="gbm", verbose=FALSE)
+```
+
+Application to the training set shows
+```{r}
+predClasse <- predict(modFit.ada,training[,-grep("classe",names(training))])
+table(predClasse, training$classe)
+accuracy <- sum(predClasse == training$classe)/length(predClasse)
+accuracy
+```
+
+And on the reduced data set...
+```{r adaboost model on reduced data, cache=TRUE}
+modFit.ada.reduced <- train(classe ~ ., data=training.sub, method="gbm", verbose=FALSE)
+```
+
+Which results in the following accuracy
+```{r}
+predClasse <- predict(modFit.ada.reduced,training.sub[,-grep("classe",names(training.sub))])
+table(predClasse, training.sub$classe)
+accuracy <- sum(predClasse == training$classe)/length(predClasse)
+accuracy
+```
+
+A more sophisticated approach would be using **random forest method**. This already includes the **cross validation**. After loading the appropriate library
+```{r, message=FALSE, warning=FALSE}
+library(randomForest)
+```
+
+The method is applied
+```{r random forest model, cache=TRUE}
+modFit <- train(classe ~ ., data=training, method="rf")
+```
+
+Examine the accuracy of this model with the training set 
+```{r}
+predClasse <- predict(modFit,training[,-grep("classe",names(training))])
+table(predClasse, training$classe)
+accuracy <- sum(predClasse == training$classe)/length(predClasse)
+accuracy
+```
+
+This accuracy is much better then the simple random forest methods above. This method will be used on the testing set as well, using the accuracy as out of sample error measure.
+```{r}
+predClasse <- predict(modFit, testing)
+table(predClasse, testing$classe)
+accuracy <- sum(predClasse == testing$classe)/length(predClasse)
+accuracy
+```
+
+The **out of sample error** is the remainder from accuracy to 100%
+```{r}
+out.of.sample.error <- 1 - sum(predClasse == testing$classe)/length(predClasse)
+out.of.sample.error
+```
+
+So about `r round(out.of.sample.error*100,2)`% of error, with an accuracy of `r round(100-out.of.sample.error*100,2)`%.
 
 
 
