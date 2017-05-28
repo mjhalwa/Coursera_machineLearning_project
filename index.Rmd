@@ -171,7 +171,7 @@ dim(training)
 ```
 
 There are sill a lot of variables and too much for a `featureplot`. So all remaining variables are just plotted against `classe`. This allows to find variables, which need a logarithm or to create a reduced data set of variables showing characteristics in `classe`. As several outliers, do not allow to view the variability of each variable on a non-logarithmic scale, outliers were omitted.
-```{r, fig.width=12, figh.height=20, cache=TRUE}
+```{r, fig.width=12, figh.height=40, cache=TRUE}
 plotData <- filter(training, gyros_dumbbell_y<20 &
                              gyros_forearm_x>-15 &
                              gyros_forearm_y<100 &

@@ -363,7 +363,7 @@ p + geom_point(alpha=0.5) + facet_wrap(~variable, scale=&quot;free_x&quot;)</cod
 modFit.simple &lt;- train(classe ~ ., data=training, method=&quot;rpart&quot;, trControl=fitControl)
 comp.time &lt;- difftime(Sys.time(), start.time)
 comp.time</code></pre>
-<pre><code>## Time difference of 11.82469 secs</code></pre>
+<pre><code>## Time difference of 9.891576 secs</code></pre>
 <p>This results in an accuracy of</p>
 <pre class="r"><code>predClasse &lt;- predict(modFit.simple,training[,-grep(&quot;classe&quot;,names(training))])
 table(predClasse, training$classe)</code></pre>
@@ -383,7 +383,7 @@ accuracy</code></pre>
 modFit.reduced &lt;- train(classe ~ ., data=training.sub, method=&quot;rpart&quot;, trControl=fitControl)
 comp.time &lt;- difftime(Sys.time(), start.time)
 comp.time</code></pre>
-<pre><code>## Time difference of 4.574271 secs</code></pre>
+<pre><code>## Time difference of 4.328042 secs</code></pre>
 <p>Leading to the following accuracy</p>
 <pre class="r"><code>predClasse &lt;- predict(modFit.reduced,training.sub[,-grep(&quot;classe&quot;,names(training.sub))])
 table(predClasse, training.sub$classe)</code></pre>
@@ -406,7 +406,7 @@ accuracy</code></pre>
 modFit.ada &lt;- train(classe ~ ., data=training, method=&quot;gbm&quot;, verbose=FALSE, trControl=fitControl)
 comp.time &lt;- difftime(Sys.time(), start.time)
 comp.time</code></pre>
-<pre><code>## Time difference of 12.46436 mins</code></pre>
+<pre><code>## Time difference of 11.96308 mins</code></pre>
 <p>with the following accuracy</p>
 <pre class="r"><code>predClasse &lt;- predict(modFit.ada,training[,-grep(&quot;classe&quot;,names(training))])
 table(predClasse, training$classe)</code></pre>
@@ -426,7 +426,7 @@ accuracy</code></pre>
 modFit.ada.reduced &lt;- train(classe ~ ., data=training.sub, method=&quot;gbm&quot;, verbose=FALSE, trControl=fitControl)
 comp.time &lt;- difftime(Sys.time(), start.time)
 comp.time</code></pre>
-<pre><code>## Time difference of 6.210519 mins</code></pre>
+<pre><code>## Time difference of 5.977954 mins</code></pre>
 <p>Acchieving an accuracy of</p>
 <pre class="r"><code>predClasse &lt;- predict(modFit.ada.reduced,training.sub[,-grep(&quot;classe&quot;,names(training.sub))])
 table(predClasse, training.sub$classe)</code></pre>
@@ -449,7 +449,7 @@ accuracy</code></pre>
 modFit.rf &lt;- train(classe ~ ., data=training, method=&quot;rf&quot;, trControl=fitControl)
 comp.time &lt;- difftime(Sys.time(), start.time)
 comp.time</code></pre>
-<pre><code>## Time difference of 28.23649 mins</code></pre>
+<pre><code>## Time difference of 27.85953 mins</code></pre>
 <p>Leading to the following accuracy</p>
 <pre class="r"><code>predClasse &lt;- predict(modFit.rf,training[,-grep(&quot;classe&quot;,names(training))])
 table(predClasse, training$classe)</code></pre>
@@ -469,7 +469,7 @@ accuracy</code></pre>
 modFit.rf.reduced &lt;- train(classe ~ ., data=training.sub, method=&quot;rf&quot;, trControl=fitControl)
 comp.time &lt;- difftime(Sys.time(), start.time)
 comp.time</code></pre>
-<pre><code>## Time difference of 12.06723 mins</code></pre>
+<pre><code>## Time difference of 11.8371 mins</code></pre>
 <p>with an accuracy of</p>
 <pre class="r"><code>predClasse &lt;- predict(modFit.rf.reduced,training.sub[,-grep(&quot;classe&quot;,names(training.sub))])
 table(predClasse, training.sub$classe)</code></pre>
@@ -504,32 +504,32 @@ kable(df.models)</code></pre>
 <tr class="odd">
 <td align="left">regression trees</td>
 <td align="right">0.4952</td>
-<td align="right">11.82S</td>
+<td align="right">9.89S</td>
 </tr>
 <tr class="even">
 <td align="left">regression trees (reduced)</td>
 <td align="right">0.4940</td>
-<td align="right">4.57S</td>
+<td align="right">4.33S</td>
 </tr>
 <tr class="odd">
 <td align="left">adaboost</td>
 <td align="right">0.9727</td>
-<td align="right">12M 27.86S</td>
+<td align="right">11M 57.78S</td>
 </tr>
 <tr class="even">
 <td align="left">adaboost (reduced)</td>
 <td align="right">0.9573</td>
-<td align="right">6M 12.63S</td>
+<td align="right">5M 58.68S</td>
 </tr>
 <tr class="odd">
 <td align="left">random forest</td>
 <td align="right">1.0000</td>
-<td align="right">28M 14.1900000000001S</td>
+<td align="right">27M 51.5699999999999S</td>
 </tr>
 <tr class="even">
 <td align="left">random forest (reduced)</td>
 <td align="right">1.0000</td>
-<td align="right">12M 4.02999999999997S</td>
+<td align="right">11M 50.23S</td>
 </tr>
 </tbody>
 </table>
