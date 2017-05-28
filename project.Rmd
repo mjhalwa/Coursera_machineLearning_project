@@ -8,14 +8,16 @@ output:
 ---
 
 # introduction
-For this course project data will be used from http://groupware.les.inf.puc-rio.br/har. 6 participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. Their activity was tracked by accelerometers on the belt, forearm, arm and dumbell. We will try to find a model, allowing to qualify a participant's quality of activity in terms of correctness.
+For this course project data will be used from http://groupware.les.inf.puc-rio.br/har. 6 participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. Their activity was tracked by accelerometers on the belt, forearm, arm and dumbell. This project predicts the performed activity from the provided data.
 
 # libraries and functions
-This project needs the following libraries. In case you don't have them installed, you may use `install.packages()` function
+This project needs the following libraries. In case they are not installed, you may use `install.packages()` function
 ```{r libraries, message=FALSE, warning=FALSE}
 library(plyr)
 library(dplyr)
 library(tidyr)
+library(knitr)
+library(lubridate)
 library(caret)
 library(rpart)
 library(gbm)
@@ -25,10 +27,10 @@ library(parallel)
 library(randomForest)
 ```
 
-Further timing code chunks was inspired by https://stackoverflow.com/questions/24595280/timing-for-chunks
+Further timing code chunks were inspired by https://stackoverflow.com/questions/24595280/timing-for-chunks
 
-# Preparing the data set
-First training and test data is loaded from the web and into `trainData` and `quizData`
+# Data Preparation
+First data is loaded from the web and into `trainData` and `quizData`
 ```{r load data, message=FALSE, cache=TRUE}
 if(!file.exists("training.csv"))
 {
@@ -47,34 +49,13 @@ quizData <- read.table("quiz.csv", header=TRUE, sep=",", na.strings = "NA",
                         stringsAsFactors=FALSE)
 ```
 
-These data sets contain the following amount of data
+These data have the following dimensions. The `quizData` is later on used for prediction.
 ```{r}
 dim(trainData)
 dim(quizData)
 ```
 
-## filtering variables
-These columns are in the training, but not in the testing set
-```{r}
-train.but.not.in.quiz <- names(trainData)[!names(trainData) %in% names(quizData)]
-train.but.not.in.quiz
-```
-
-Therefore all data, but 'classe' are contained in the quiz set, while quiz contains the column `problem_id` (as column number of the data sets is equal). From all columns the ones with NAs in `quizData` can be excluded from model building, as they allow no prediction:
-```{r}
-nas.in.quizData <- apply(is.na(quizData), 2, sum)
-nas.in.quizData <- nas.in.quizData[nas.in.quizData>0]
-```
-
-As the minimum number of NAs per variable is `r min(nas.in.quizData)` and the testing set only contains 20 rows, these can all be excluded from training and quiz data set.
-```{r}
-trainData <- trainData[,! names(trainData) %in% names(nas.in.quizData)]
-quizData <- quizData[,! names(quizData) %in% names(nas.in.quizData)]
-```
-
-This leaves `r dim(trainData)` variables in `trainData` and `quizData` (including the predict)
-
-Next `classe` and `user_name` are formatted to factors
+The two columns `classe` and `user_name` are formatted to factors in both sets.
 ```{r}
 trainData$classe <- as.factor(trainData$classe)
 trainData$user_name <- as.factor(trainData$user_name)
@@ -82,19 +63,25 @@ quizData$user_name <- as.factor(quizData$user_name)
 ```
 
 ## correcting the timestamp
-the data contains two timestamps: `raw_timestamp_part_1` and `raw_timestamp_part_2`, besides the human readable `cvtd_timestamp`. Comparing `part_1` with the `cvtd`, we find, that it contains the main time
+Both sets contain timestamp columns:
+
+- `raw_timestamp_part_1` and  
+- `raw_timestamp_part_2`  
+- besides the human readable `cvtd_timestamp`.
+
+These columns were no further explaind. The following analysis revealed that `part_1` contains the main time (redudant in `cvdt`)
 ```{r}
 as.POSIXct(head(trainData$raw_timestamp_part_1),origin="1970-01-01",tz="GMT")
 head(trainData$cvtd_timestamp)
 ```
 
-So what about `part_2`? This seems to be the milliseconds. Because, if we look at the first 44 elements, or at a plot versus data line number, we find a periodicity in a growth from 0 to 1,000,000 with following step to 0 again.
+, while `part_2` are the milliseconds. Looking at e.g. the first 44 elements, or at a plot versus data line number, a periodicity in line number is found, with an increase from 0 to 1E6, followed by a decrease to about 0.
 ```{r, fig.width=12, figh.height=4}
 head(trainData$raw_timestamp_part_2,n=44)
 with(head(trainData,n=1000), plot(x=X, y=raw_timestamp_part_2,type="l"))
 ```
 
-Therefore these 3 variables may be put into 1 timestamp column, this is demonstrated with `temp1` and `temp2` first.
+Therefore all timestamp columns are put into one single column, which is demonstrated first
 ```{r}
 total.time <- function(part1, part2)
 {
@@ -107,13 +94,34 @@ data.frame(just.part1=format(temp1, "%Y-%m-%d %H:%M:%OS6"),
            total.time=format(temp2, "%Y-%m-%d %H:%M:%OS6"))
 ```
 
-Neglecting minor rounding errors on the last digits, this is applied to training and quiz data set, deleting the other time columns. Further we dismiss the line number `X`
+Neglecting minor rounding errors on the last digits, this is applied to training and quiz data set. The all prior time columns and the line number `X` are dismissed
 ```{r}
 trainData$timestamp <- total.time(trainData$raw_timestamp_part_1, trainData$raw_timestamp_part_2)
 quizData$timestamp <- total.time(quizData$raw_timestamp_part_1, quizData$raw_timestamp_part_2)
 trainData <- select(trainData, -c(raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, X))
 quizData <- select(quizData, -c(raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, X))
 ```
+
+## filtering variables
+First the quiz and training set are compared to possibly find columns in the training set, which are not in the quiz set and may therefore be neglected.
+```{r}
+train.but.not.in.quiz <- names(trainData)[!names(trainData) %in% names(quizData)]
+train.but.not.in.quiz
+```
+
+It seems that all colmuns in the training set are in the quiz set as well (the quiz set contains the column `problem_id` while the training set has the predictor column `classe`). Next the quiz set was analysed to find columns containing `NA`. These columns can be excluded from model building, as they allow no prediction:
+```{r}
+nas.in.quizData <- apply(is.na(quizData), 2, sum)
+nas.in.quizData <- nas.in.quizData[nas.in.quizData>0]
+```
+
+As the minimum number of NAs per variable is `r min(nas.in.quizData)` and the quiz set only contains `r dim(quizData)[1]` rows, all found columns are excluded from training and quiz data set
+```{r}
+trainData <- trainData[,! names(trainData) %in% names(nas.in.quizData)]
+quizData <- quizData[,! names(quizData) %in% names(nas.in.quizData)]
+```
+
+leaving `r dim(trainData)` variables.
 
 
 ## the tidy data set
@@ -123,7 +131,7 @@ names(trainData)
 ```
 
 # Data partitioning
-For model building we split `trainData` in a set for `training` and a set for `testing`
+For model building `trainData` is split into `training` and `testing`, leaving `testing` untouched
 ```{r}
 set.seed(1)
 inTrain <- createDataPartition(y=trainData$classe, p=0.75, list=FALSE)
@@ -131,42 +139,38 @@ training <- trainData[inTrain,]
 testing <- trainData[-inTrain,]
 ```
 
-Now a model will be developed on the the training set
-```{r}
-dim(training)
-```
+Now a model will be developed on the the `training` set, containing `r dim(training)[1]` rows of data and `r dim(training)[2]-1` possible regressors.
 
-# reduction of variables
-First we try to find out about the importance of the time stamp for prediction:
+
+# reduction of regressors
+The importance of the time stamp for prediction is examined with the following plot
 ```{r, fig.width=12, fig.height=5}
 library(ggplot2)
 p <- ggplot(filter(training, timestamp < "2011-11-30"), aes(x=timestamp, y=roll_belt, colour=classe))
 p + geom_point()
 ```
 
-From this plot, it is clear, the the instructions were confusing, and we don't need to predict whether a certaing activity was performed wrong or right. We need to predict, the activity performed. Therefore we can neglect the variables `timestamp`, `new_window` and `num_window` as they have a predefined correlation with `classe`, not allowing general prediction. Same goes for `user_name`
+From this plot, it is clear that the `timestamp` can be neglected. Having tried additional plots with `new_window` and `num_window` showed the same predefined correlation with `classe` due to some activity time schedule for the participants. These variables will not lead to a general prediction. Same goes for `user_name`
 ```{r}
 training <- select(training, -c(timestamp, new_window, num_window, user_name))
 ```
 
-Let's try to find highly correlated data with a simple method. A correlation matrix is calculated from all remaining columns, but `classe` and `user_name`. this can further be analyzed with the `findCorrelation` function
+Next highly correlated variables are searched, to further reduce the number or regressors. A correlation matrix is calculated from all remaining columns, but `classe`. Then `findCorrelation` returns columns having a correlation higher than 0.9 to other variables.
 ```{r}
 corrMatrix <- cor(select(training,-c(classe)))
 corrCols.names <- findCorrelation(corrMatrix, names=TRUE, cutoff=0.90)
 corrCols <- as.numeric(lapply(corrCols.names, FUN=grep, x=names(training)))
 corrCols.names
-corrCols
 ```
 
-These columns show a high correlation with some other column and are therefore removed
+These columns are removed, as their information is contained in their correlated columns.
 ```{r}
 dim(training)
 training <- training[,-corrCols]
 dim(training)
 ```
 
-
-All remaining variables are then plotted against `classe` to reveal if logarithm of any variable is needed. Further this plot allows to compare all variables for their correlation with the desired predictor. As several plots contain outliers, not allowing to see the variability of each variable. So outliers were omitted.
+There are sill a lot of variables and too much for a `featureplot`. So all remaining variables are just plotted against `classe`. This allows to find variables, which need a logarithm or to create a reduced data set of variables showing characteristics in `classe`. As several outliers, do not allow to view the variability of each variable on a non-logarithmic scale, outliers were omitted.
 ```{r, fig.width=12, figh.height=20, cache=TRUE}
 plotData <- filter(training, gyros_dumbbell_y<20 &
                              gyros_forearm_x>-15 &
@@ -178,7 +182,7 @@ p <- ggplot(plotData, aes(x=value, y=classe, colour=classe))
 p + geom_point(alpha=0.5) + facet_wrap(~variable, scale="free_x")
 ```
 
-All data show good variability. An additional logarithm is not needed. From the above graphic, a **reduced set of variables** can be found. These show different dependences for `classe` and may therefore be the most useful variables for prediction.
+All data show good variability and can be used on a non-logarithmic scale. Several variables seem to show some correlation with `classe`. These will be extracted to a **reduced set of variables**. In the following model comparisons, both the `training` set and this reduced set will be examined for prediction.
 ```{r}
 training.sub <- select(training, c(gyros_arm_y, gyros_belt_x, gyros_belt_y, gyros_belt_z,
                                gyros_dumbbell_y, gyros_forearm_x, gyros_forearm_z,
@@ -190,32 +194,39 @@ training.sub <- select(training, c(gyros_arm_y, gyros_belt_x, gyros_belt_y, gyro
 
 # Comparing models on the training set
 
-From above, we have 2 sets of variables for training:  
+The last chapters resulted in 2 sets of variables for training:  
 
 * `training` which contains `r length(names(training)-1)` regressors  
 * `training.sub` which has a reduced set of `r length(names(training.sub)-1)` regressors, compared to `training`  
 
-To predict on `classe` the following model strategies will be compared:
+To predict on `classe` the following methods will be compared:
 
 * __Classification and regression trees__  
 * __Adaboost__  
 * __Random Forest__  
 
-In order to apply __cross validation__ and have low computing times the following training control is used (with helpf from the caret documentation)
+In order to apply __cross validation__ and have low computing times the following training control is used (with help from the caret documentation)
 ```{r}
 fitControl <- trainControl(## 10-fold Cross validation
                            method = "repeatedcv",
                            number = 10,
                            ## repeated ten times
-                           repeats = 1) #25
+                           repeats = 1) #instead of 25 by default
+```
+
+Each model's results will be summed up in a data frame to be displayed later on.
+```{r}
+df.models <- data.frame(method=character(6), accuracy=integer(6), seconds=numeric(6),
+                        stringsAsFactors=FALSE)
 ```
 
 ## Classification and regression trees
 First a simple model on `training` is created using **regression trees**
 ```{r simple model, cache=TRUE}
 start.time <- Sys.time()
-modFit.simple <- train(classe ~ ., data=training, method="rpart")
-difftime(Sys.time(), start.time)
+modFit.simple <- train(classe ~ ., data=training, method="rpart", trControl=fitControl)
+comp.time <- difftime(Sys.time(), start.time)
+comp.time
 ```
 
 This results in an accuracy of
@@ -223,14 +234,16 @@ This results in an accuracy of
 predClasse <- predict(modFit.simple,training[,-grep("classe",names(training))])
 table(predClasse, training$classe)
 accuracy <- sum(predClasse == training$classe)/length(predClasse)
+df.models[1,] <- c("regression trees",accuracy,as.numeric(comp.time, units="secs"))
 accuracy
 ```
 
 Then the same method is applied to `training.sub`
 ```{r reduced model, cache=TRUE}
 start.time <- Sys.time()
-modFit.reduced <- train(classe ~ ., data=training.sub, method="rpart")
-difftime(Sys.time(), start.time)
+modFit.reduced <- train(classe ~ ., data=training.sub, method="rpart", trControl=fitControl)
+comp.time <- difftime(Sys.time(), start.time)
+comp.time
 ```
 
 Leading to the following accuracy
@@ -238,6 +251,7 @@ Leading to the following accuracy
 predClasse <- predict(modFit.reduced,training.sub[,-grep("classe",names(training.sub))])
 table(predClasse, training.sub$classe)
 accuracy <- sum(predClasse == training.sub$classe)/length(predClasse)
+df.models[2,] <- c("regression trees (reduced)",accuracy,as.numeric(comp.time, units="secs"))
 accuracy
 ```
 
@@ -246,7 +260,8 @@ In the case of various varibles, with different correlations to the predictors, 
 ```{r adaboost model, cache=TRUE}
 start.time <- Sys.time()
 modFit.ada <- train(classe ~ ., data=training, method="gbm", verbose=FALSE, trControl=fitControl)
-difftime(Sys.time(), start.time)
+comp.time <- difftime(Sys.time(), start.time)
+comp.time
 ```
 
 with the following accuracy
@@ -254,6 +269,7 @@ with the following accuracy
 predClasse <- predict(modFit.ada,training[,-grep("classe",names(training))])
 table(predClasse, training$classe)
 accuracy <- sum(predClasse == training$classe)/length(predClasse)
+df.models[3,] <- c("adaboost",accuracy,as.numeric(comp.time, units="secs"))
 accuracy
 ```
 
@@ -261,7 +277,8 @@ Using `training.sub` this results in
 ```{r adaboost model on reduced data, cache=TRUE}
 start.time <- Sys.time()
 modFit.ada.reduced <- train(classe ~ ., data=training.sub, method="gbm", verbose=FALSE, trControl=fitControl)
-difftime(Sys.time(), start.time)
+comp.time <- difftime(Sys.time(), start.time)
+comp.time
 ```
 
 Acchieving an accuracy of
@@ -269,6 +286,7 @@ Acchieving an accuracy of
 predClasse <- predict(modFit.ada.reduced,training.sub[,-grep("classe",names(training.sub))])
 table(predClasse, training.sub$classe)
 accuracy <- sum(predClasse == training.sub$classe)/length(predClasse)
+df.models[4,] <- c("adaboost (reduced)",accuracy,as.numeric(comp.time, units="secs"))
 accuracy
 ```
 
@@ -277,7 +295,8 @@ A more sophisticated method is **random forest**. This method is already expecte
 ```{r random forest model, cache=TRUE}
 start.time <- Sys.time()
 modFit.rf <- train(classe ~ ., data=training, method="rf", trControl=fitControl)
-difftime(Sys.time(), start.time)
+comp.time <- difftime(Sys.time(), start.time)
+comp.time
 ```
 
 Leading to the following accuracy 
@@ -285,6 +304,7 @@ Leading to the following accuracy
 predClasse <- predict(modFit.rf,training[,-grep("classe",names(training))])
 table(predClasse, training$classe)
 accuracy <- sum(predClasse == training$classe)/length(predClasse)
+df.models[5,] <- c("random forest",accuracy,as.numeric(comp.time, units="secs"))
 accuracy
 ```
 
@@ -292,7 +312,8 @@ Then the `training.sub` is used for training
 ```{r random forest model on reduced data, cache=TRUE}
 start.time <- Sys.time()
 modFit.rf.reduced <- train(classe ~ ., data=training.sub, method="rf", trControl=fitControl)
-difftime(Sys.time(), start.time)
+comp.time <- difftime(Sys.time(), start.time)
+comp.time
 ```
 
 with an accuracy of 
@@ -300,17 +321,26 @@ with an accuracy of
 predClasse <- predict(modFit.rf.reduced,training.sub[,-grep("classe",names(training.sub))])
 table(predClasse, training.sub$classe)
 accuracy <- sum(predClasse == training.sub$classe)/length(predClasse)
+df.models[6,] <- c("random forest (reduced)",accuracy,as.numeric(comp.time, units="secs"))
 accuracy
 ```
 
-## summary
+## model summary
+```{r method comparison}
+df.models$accuracy <- round(as.numeric(df.models$accuracy),4)
+df.models$seconds <- round(as.numeric(df.models$seconds),2)
+df.models$seconds <- seconds_to_period(df.models$seconds)
+df.models <- rename(df.models, comp.time=seconds)
+kable(df.models)
+```
+
 The above approaches show different accuracy, the "simple" method, using regression trees has the lowest and in fact too low accuracy, but high speed, taking just several seconds.
 
 The adaboost aproach can be tuned, using cross validation and only 1 repetition, but still takes several minutes. Adaboost has higher accuracy and using the reduced variable set, doubles calculation speed and has only a minor drop in accuracy.
 
-Random forest has best accuracy, but takes very long to compute, even for the cross validation setting with only 1 repetition.
+Random forest has best accuracy of 1. Using the trainControl, the computation time was lowered a lot. Now the model on the reduced data set has much better accuracy, while needing twice the time compared to adaboost.
 
-Thus **adaboost** on the reduced variable set is chosen as compromise on speed and accuracy. To sum up the reduced data set contains the following variables:
+As the high accuracy of random forest may be a sign for overfitting **adaboost on the reduced variable set** is chosen as compromise on speed and accuracy. To sum up the reduced data set contains the following variables:
 ```{r}
 names(training.sub)
 ```
