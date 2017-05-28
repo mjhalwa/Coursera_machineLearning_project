@@ -28,13 +28,24 @@ for the quiz you will need to:
 
 
 # introduction
-For this course project data will be used from http://groupware.les.inf.puc-rio.br/har. 6 participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. There activity was tracked by accelerometers on the belt, forearm, arm and dumbell. We will try to find a model, allowing to qualify a participant's quality of activity in terms of correctness.
+For this course project data will be used from http://groupware.les.inf.puc-rio.br/har. 6 participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. Their activity was tracked by accelerometers on the belt, forearm, arm and dumbell. We will try to find a model, allowing to qualify a participant's quality of activity in terms of correctness.
 
-# libraries
+# libraries and functions
 This project needs the following libraries. In case you don't have them installed, you may use `install.packages()` function
 ```{r libraries, message=FALSE, warning=FALSE}
+library(plyr)
 library(dplyr)
+library(tidyr)
+library(caret)
+library(rpart)
+library(gbm)
+library(survival)
+library(splines)
+library(parallel)
+library(randomForest)
 ```
+
+Further timing code chunks was inspired by https://stackoverflow.com/questions/24595280/timing-for-chunks
 
 # Preparing the data set
 First training and test data is loaded from the web and into `trainData` and `quizData`
@@ -131,10 +142,9 @@ Now the training data set has the following variables
 names(trainData)
 ```
 
-# model building
+# Data partitioning
 For model building we split `trainData` in a set for `training` and a set for `testing`
 ```{r}
-library(caret)
 set.seed(1)
 inTrain <- createDataPartition(y=trainData$classe, p=0.75, list=FALSE)
 training <- trainData[inTrain,]
@@ -146,7 +156,7 @@ Now a model will be developed on the the training set
 dim(training)
 ```
 
-## find important variables
+# reduction of variables
 First we try to find out about the importance of the time stamp for prediction:
 ```{r, fig.width=12, fig.height=5}
 library(ggplot2)
@@ -176,16 +186,8 @@ dim(training)
 ```
 
 
-All remaining variables are then plotted against `classe` to reveal if logarithm of any variable is needed. Further this plot allows to compare all variables for their correlation with the desired predictor.
-```{r, fig.width=12, figh.height=12, cache=TRUE}
-library(tidyr)
-plotData <- gather(training, variable, value, -classe)
-p <- ggplot(plotData, aes(x=value, y=classe, colour=classe))
-p + geom_point(alpha=0.5) + facet_wrap(~variable, scale="free_x")
-```
-
-This contains several plots, where outliers do not reveal the variability of each variable. In the replot, the outliers are omitted.
-```{r, fig.width=12, figh.height=12, cache=TRUE}
+All remaining variables are then plotted against `classe` to reveal if logarithm of any variable is needed. Further this plot allows to compare all variables for their correlation with the desired predictor. As several plots contain outliers, not allowing to see the variability of each variable. So outliers were omitted.
+```{r, fig.width=12, figh.height=20, cache=TRUE}
 plotData <- filter(training, gyros_dumbbell_y<20 &
                              gyros_forearm_x>-15 &
                              gyros_forearm_y<100 &
@@ -196,23 +198,7 @@ p <- ggplot(plotData, aes(x=value, y=classe, colour=classe))
 p + geom_point(alpha=0.5) + facet_wrap(~variable, scale="free_x")
 ```
 
-All data show good variability. An additional logarithm is not needed.
-
-## the model
-First we try a simple model with all remaining variables using **regression trees**
-```{r simple model, cache=TRUE}
-modFit.simple <- train(classe ~ ., data=training, method="rpart")
-```
-
-The validation on the training set looks like this, with the according accuracy
-```{r}
-predClasse <- predict(modFit.simple,training[,-grep("classe",names(training))])
-table(predClasse, training$classe)
-accuracy <- sum(predClasse == training$classe)/length(predClasse)
-accuracy
-```
-
-This is too inaccurate. Therefore we try to reduce the variables to the ones above showing in-equal distributions
+All data show good variability. An additional logarithm is not needed. From the above graphic, a **reduced set of variables** can be found. These show different dependences for `classe` and may therefore be the most useful variables for prediction.
 ```{r}
 training.sub <- select(training, c(gyros_arm_y, gyros_belt_x, gyros_belt_y, gyros_belt_z,
                                gyros_dumbbell_y, gyros_forearm_x, gyros_forearm_z,
@@ -222,25 +208,68 @@ training.sub <- select(training, c(gyros_arm_y, gyros_belt_x, gyros_belt_y, gyro
                                yaw_arm, yaw_belt, classe))
 ```
 
-Then we train a model with these
-```{r reduced model, cache=TRUE}
-modFit.reduced <- train(classe ~ ., data=training.sub, method="rpart")
+# Comparing models on the training set
+
+From above, we have 2 sets of variables for training:  
+
+* `training` which contains `r length(names(training)-1)` regressors  
+* `training.sub` which has a reduced set of `r length(names(training.sub)-1)` regressors, compared to `training`  
+
+To predict on `classe` the following model strategies will be compared:
+
+* __Classification and regression trees__  
+* __Adaboost__  
+* __Random Forest__  
+
+In order to apply __cross validation__ and have low computing times the following training control is used (with helpf from the caret documentation)
+```{r}
+fitControl <- trainControl(## 10-fold Cross validation
+                           method = "repeatedcv",
+                           number = 10,
+                           ## repeated ten times
+                           repeats = 1) #25
 ```
 
-This results in the following accuracy
+## Classification and regression trees
+First a simple model on `training` is created using **regression trees**
+```{r simple model, cache=TRUE}
+start.time <- Sys.time()
+modFit.simple <- train(classe ~ ., data=training, method="rpart")
+difftime(Sys.time(), start.time)
+```
+
+This results in an accuracy of
 ```{r}
-predClasse <- predict(modFit.reduced,training.sub[,-grep("classe",names(training.sub))])
-table(predClasse, training.sub$classe)
+predClasse <- predict(modFit.simple,training[,-grep("classe",names(training))])
+table(predClasse, training$classe)
 accuracy <- sum(predClasse == training$classe)/length(predClasse)
 accuracy
 ```
 
-But this is still too inaccurate and even worse than above. In this case of various varibles, which seem to have different correlation to the predictor, **adaboost** may be helpful, which is implemented in the `gbm` method. Let's try it on both the training data set and the reduced data set.
-```{r adaboost model, cache=TRUE}
-modFit.ada <- train(classe ~ ., data=training, method="gbm", verbose=FALSE)
+Then the same method is applied to `training.sub`
+```{r reduced model, cache=TRUE}
+start.time <- Sys.time()
+modFit.reduced <- train(classe ~ ., data=training.sub, method="rpart")
+difftime(Sys.time(), start.time)
 ```
 
-Application to the training set shows
+Leading to the following accuracy
+```{r}
+predClasse <- predict(modFit.reduced,training.sub[,-grep("classe",names(training.sub))])
+table(predClasse, training.sub$classe)
+accuracy <- sum(predClasse == training.sub$classe)/length(predClasse)
+accuracy
+```
+
+## Adaboost
+In the case of various varibles, with different correlations to the predictors, **adaboost** may be a useful method (using `gbm()` underneath). On `training` this results in:
+```{r adaboost model, cache=TRUE}
+start.time <- Sys.time()
+modFit.ada <- train(classe ~ ., data=training, method="gbm", verbose=FALSE, trControl=fitControl)
+difftime(Sys.time(), start.time)
+```
+
+with the following accuracy
 ```{r}
 predClasse <- predict(modFit.ada,training[,-grep("classe",names(training))])
 table(predClasse, training$classe)
@@ -248,40 +277,68 @@ accuracy <- sum(predClasse == training$classe)/length(predClasse)
 accuracy
 ```
 
-And on the reduced data set...
+Using `training.sub` this results in
 ```{r adaboost model on reduced data, cache=TRUE}
-modFit.ada.reduced <- train(classe ~ ., data=training.sub, method="gbm", verbose=FALSE)
+start.time <- Sys.time()
+modFit.ada.reduced <- train(classe ~ ., data=training.sub, method="gbm", verbose=FALSE, trControl=fitControl)
+difftime(Sys.time(), start.time)
 ```
 
-Which results in the following accuracy
+Acchieving an accuracy of
 ```{r}
 predClasse <- predict(modFit.ada.reduced,training.sub[,-grep("classe",names(training.sub))])
 table(predClasse, training.sub$classe)
-accuracy <- sum(predClasse == training$classe)/length(predClasse)
+accuracy <- sum(predClasse == training.sub$classe)/length(predClasse)
 accuracy
 ```
 
-A more sophisticated approach would be using **random forest method**. This already includes the **cross validation**. After loading the appropriate library
-```{r, message=FALSE, warning=FALSE}
-library(randomForest)
-```
-
-The method is applied
+## random forest
+A more sophisticated method is **random forest**. This method is already expected to take much longer than the others. First this method is applied to `training`
 ```{r random forest model, cache=TRUE}
-modFit <- train(classe ~ ., data=training, method="rf")
+start.time <- Sys.time()
+modFit.rf <- train(classe ~ ., data=training, method="rf", trControl=fitControl)
+difftime(Sys.time(), start.time)
 ```
 
-Examine the accuracy of this model with the training set 
+Leading to the following accuracy 
 ```{r}
-predClasse <- predict(modFit,training[,-grep("classe",names(training))])
+predClasse <- predict(modFit.rf,training[,-grep("classe",names(training))])
 table(predClasse, training$classe)
 accuracy <- sum(predClasse == training$classe)/length(predClasse)
 accuracy
 ```
 
-This accuracy is much better then the simple random forest methods above. This method will be used on the testing set as well, using the accuracy as out of sample error measure.
+Then the `training.sub` is used for training
+```{r random forest model on reduced data, cache=TRUE}
+start.time <- Sys.time()
+modFit.rf.reduced <- train(classe ~ ., data=training.sub, method="rf", trControl=fitControl)
+difftime(Sys.time(), start.time)
+```
+
+with an accuracy of 
 ```{r}
-predClasse <- predict(modFit, testing)
+predClasse <- predict(modFit.rf.reduced,training.sub[,-grep("classe",names(training.sub))])
+table(predClasse, training.sub$classe)
+accuracy <- sum(predClasse == training.sub$classe)/length(predClasse)
+accuracy
+```
+
+## summary
+The above approaches show different accuracy, the "simple" method, using regression trees has the lowest and in fact too low accuracy, but high speed, taking just several seconds.
+
+The adaboost aproach can be tuned, using cross validation and only 1 repetition, but still takes several minutes. Adaboost has higher accuracy and using the reduced variable set, doubles calculation speed and has only a minor drop in accuracy.
+
+Random forest has best accuracy, but takes very long to compute, even for the cross validation setting with only 1 repetition.
+
+Thus **adaboost** on the reduced variable set is chosen as compromise on speed and accuracy. To sum up the reduced data set contains the following variables:
+```{r}
+names(training.sub)
+```
+
+# validation
+The chosen model is applied to the testing set to get the final accuracy and **out of sample error** (= 100% minus accuracy)
+```{r}
+predClasse <- predict(modFit.ada.reduced, testing)
 table(predClasse, testing$classe)
 accuracy <- sum(predClasse == testing$classe)/length(predClasse)
 accuracy
@@ -293,7 +350,14 @@ out.of.sample.error <- 1 - sum(predClasse == testing$classe)/length(predClasse)
 out.of.sample.error
 ```
 
-So about `r round(out.of.sample.error*100,2)`% of error, with an accuracy of `r round(100-out.of.sample.error*100,2)`%.
+Validation leads to:
 
+* `r round(out.of.sample.error*100,2)`% of error and  
+* an accuracy of `r round(100-out.of.sample.error*100,2)`%.
 
-
+# Prediction on the quiz data
+Finally this model is applied to the quiz data to predict `classe`
+```{r}
+predClasse <- predict(modFit.ada.reduced, quizData)
+predClasse
+```
