@@ -1,5 +1,5 @@
 ---
-title: "Machine Learning Project"
+title: "Machine Learning Project - Predicting activity from body sensors"
 author: "Martin Halwachs"
 date: "25 Mai 2017"
 output:
