@@ -36,3 +36,22 @@ The test data are available here:
 https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
 
 The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+## summed up requirements:
+
+- predict the `classe` variable  
+- create report  
+- describe how you **build the model**  
+- describe how you use **cross validation**  
+- estimate the **out of sample error**  
+- explain why you made your choices  
+- github repository  
+    - R markdown file  
+    - compiled HTM file  
+    - less than 2000 words  
+    - less than 5 figures  
+    - submit with a gh-pages branch = allow online view of HTML  
+    
+for the quiz you will need to:
+
+- predict 20 different test cases with your model  

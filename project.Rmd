@@ -7,26 +7,6 @@ output:
     toc: TRUE
 ---
 
-# requirements
-
-- predict the `classe` variable  
-- create report  
-- describe how you **build the model**  
-- describe how you use **cross validation**  
-- estimate the **out of sample error**  
-- explain why you made your choices  
-- github repository  
-    - R markdown file  
-    - compiled HTM file  
-    - less than 2000 words  
-    - less than 5 figures  
-    - submit with a gh-pages branch = allow online view of HTML  
-    
-for the quiz you will need to:
-
-- predict 20 different test cases with your model  
-
-
 # introduction
 For this course project data will be used from http://groupware.les.inf.puc-rio.br/har. 6 participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. Their activity was tracked by accelerometers on the belt, forearm, arm and dumbell. We will try to find a model, allowing to qualify a participant's quality of activity in terms of correctness.
 
